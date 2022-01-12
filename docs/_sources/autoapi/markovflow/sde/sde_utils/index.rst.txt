@@ -1,0 +1,53 @@
+:py:mod:`markovflow.sde.sde_utils`
+==================================
+
+.. py:module:: markovflow.sde.sde_utils
+
+.. autoapi-nested-parse::
+
+   Utility functions for SDE
+
+
+
+Module Contents
+---------------
+
+.. py:function:: euler_maruyama(sde: markovflow.sde.SDE, x0: tensorflow.Tensor, time_grid: tensorflow.Tensor) -> tensorflow.Tensor
+
+   Numerical Simulation of SDEs of type: dx(t) = f(x,t)dt + L(x,t)dB(t) using the Euler-Maruyama Method.
+
+   ..math:: x(t+1) = x(t) + f(x,t)dt + L(x,t)*sqrt(dt*q)*N(0,I)
+
+   :param sde: Object of SDE class
+   :param x0: state at start time, t0, with shape (num_batch, state_dim)
+   :param time_grid: A homogeneous time grid for simulation, (num_transitions, )
+
+   :return: Simulated SDE values, (num_batch, num_transitions+1, state_dim)
+
+   Note: evaluation time grid is [t0, tn], x0 value is appended for t0 time.
+   Thus, simulated values are (num_transitions+1).
+
+
+.. py:function:: linearize_sde(sde: markovflow.sde.SDE, transition_times: gpflow.base.TensorType, q_mean: gpflow.base.TensorType, q_covar: gpflow.base.TensorType, initial_mean: gpflow.base.TensorType, initial_chol_covariance: gpflow.base.TensorType, process_chol_covariances: gpflow.base.TensorType) -> markovflow.state_space_model.StateSpaceModel
+
+   Linearizes the SDE (with fixed diffusion) on the basis of the Gaussian over states
+
+   Note: this currently only works for sde with a state dimension of 1.
+
+   ..math:: q(\cdot) \sim N(q_{mean}, q_{covar})
+
+   ..math:: A_{i}^{*} = E_{q(.)}[d f(x)/ dx]
+   ..math:: b_{i}^{*} = E_{q(.)}[f(x)] - A_{i}^{*}  E_{q(.)}[x]
+
+   :param sde: SDE to be linearized.
+   :param transition_times: Transition_times, (num_transitions, )
+   :param q_mean: mean of Gaussian over states with shape (num_batch, num_states, state_dim).
+   :param q_covar: covariance of Gaussian over states with shape (num_batch, num_states, state_dim, state_dim).
+   :param initial_mean: The initial mean, with shape ``[num_batch, state_dim]``.
+   :param initial_chol_covariance: Cholesky of the initial covariance, with shape ``[num_batch, state_dim, state_dim]``.
+   :param process_chol_covariances: Cholesky of the noise covariance matrices, with shape
+       ``[num_batch, num_states, state_dim, state_dim]``.
+
+   :return: the state-space model of the linearized SDE.
+
+

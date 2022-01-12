@@ -1,0 +1,166 @@
+:py:mod:`markovflow.models.spatio_temporal_variational`
+=======================================================
+
+.. py:module:: markovflow.models.spatio_temporal_variational
+
+.. autoapi-nested-parse::
+
+   Module containing a model for sparse spatio temporal variational inference
+
+
+
+Module Contents
+---------------
+
+.. py:class:: SparseSpatioTemporalKernel(kernel_space: gpflow.kernels.Kernel, kernel_time: markovflow.kernels.SDEKernel, inducing_space)
+
+   Bases: :py:obj:`markovflow.kernels.IndependentMultiOutput`
+
+   A spatio-temporal kernel  k(s,t) can be built from the product of a spatial kernel kₛ(s)
+   and a Markovian temporal kernel kₜ(t), i.e. k(s,t) = kₛ(s) kₜ(t)
+
+   A GP f(.)∈ ℝ^m  with kernel  k(Z,.)  [with space marginalized to locations Z]
+   can be build as f(.) = chol(Kₛ(Z, Z)) @ [H s₁(.),..., H sₘ(.)],
+
+   where s₁(.),...,sₘ(.) are iid SDEs from the equivalent representation of markovian kernel kₜ(t)
+
+   :param kernel_space: spatial kernel
+   :param kernel_time: temporal kernel
+   :param inducing_space: spatial inducing points
+
+   .. py:method:: generate_emission_model(self, time_points: tensorflow.Tensor) -> markovflow.emission_model.EmissionModel
+
+      Generate the emission matrix :math:`H`.
+      This is the direct sum of the shared m child emission matrices H,
+      pre-multiplied by the Cholesky factor of the spatial kernel evaluated at Z.
+          chol(Kₛ(Z, Z)) @ [H,..., H]
+
+      :param time_points: The time points over which the emission model is defined, with shape
+                      ``batch_shape + [num_data]``.
+      :return: The emission model associated with this kernel.
+
+
+
+.. py:class:: SpatioTemporalBase(inducing_space, kernel_space: gpflow.kernels.Kernel, kernel_time: markovflow.kernels.SDEKernel, likelihood: gpflow.likelihoods.Likelihood)
+
+   Bases: :py:obj:`markovflow.models.models.MarkovFlowSparseModel`, :py:obj:`abc.ABC`
+
+   Model for Spatio-temporal GP regression using a factor kernel
+   k_space_time((s,t),(s',t')) = k_time(t,t') * k_space(s,s')
+
+   where k_time is a Markovian kernel.
+
+   The following notation is used:
+       * X=(x,t) - the space-time points of the training data.
+       * zₛ - the space inducing/pseudo points.
+       * zₜ - the time inducing/pseudo points.
+       * y - observations corresponding to points X.
+       * f(.,.) the spatio-temporal process
+       * x(.,.) the SSM formulation of the spatio-temporal process
+       * u(.) = x(zₛ,.) - the spatio-temporal SSM marginalized at zₛ
+       * p(y | f) - the likelihood
+       * p(.) the prior distribution
+       * q(.) the variational distribution
+
+   This can be seen as the temporal extension of gpflow.SVGP,
+   where instead of fixed inducing variables u, they are now time dependent u(t)
+   and follow a Markov chain.
+
+   for a fixed set of space points zₛ
+   p(x(zₛ, .)) is a continuous time process of state dimension Mₛd
+   for a fixed time slice t, p(x(.,t)) ~ GP(0, kₛ)
+
+   The following conditional independence holds:
+   p(x(s,t) | x(zₛ, .)) = p(x(s,t) | s(zₛ, t)), i.e.,
+   prediction at a new point at time t given x(zₛ, .) only depends on s(zₛ, t)
+
+   This builds a spatially sparse process as
+   q(x(.,.)) = q(x(zₛ, .)) p(x(.,.) |x(zₛ, .)),
+   where the multi-output temporal process q(x(zₛ, .)) is also sparse
+   q(x(zₛ, .)) = q(x(zₛ, zₜ)) p(x(zₛ,.) |x(zₛ,  zₜ))
+
+   the marginal q(x(zₛ, zₜ)) is parameterized as a multivariate Gaussian distribution
+
+   :param inducing_space: inducing space points [Ms, D]
+   :param kernel_space: Gpflow space kernel
+   :param kernel_time: Markovflow time kernel
+   :param likelihood: a likelihood object
+
+   .. py:method:: space_time_predict_f(self, X)
+
+      Predict marginal function values at `X`. Note the
+      time points should be sorted.
+
+      :param X: Time point and associated spatial dimension to generate observations for,
+       with shape
+          ``batch_shape + [space_dim + 1, num_new_time_points]``.
+
+      :return: Predicted mean and covariance for the new time points, with respective shapes
+          ``batch_shape + [num_new_time_points, output_dim]`` and either
+          ``batch_shape + [num_new_time_points, output_dim, output_dim]`` or
+          ``batch_shape + [num_new_time_points, output_dim]``.
+
+
+   .. py:method:: loss(self, input_data: Tuple[tensorflow.Tensor, tensorflow.Tensor]) -> tensorflow.Tensor
+      :abstractmethod:
+
+      Obtain a `Tensor` representing the loss, which can be used to train the model.
+
+      :param input_data: A tuple of time points and observations containing the data at which
+          to calculate the loss for training the model.
+
+      :raises NotImplementedError: Must be implemented in derived classes.
+
+
+   .. py:method:: posterior(self) -> markovflow.posterior.PosteriorProcess
+      :property:
+
+      Posterior 
+
+
+
+.. py:class:: SparseSpatioTemporalVariational(inducing_space, inducing_time, kernel_space: gpflow.kernels.Kernel, kernel_time: markovflow.kernels.SDEKernel, likelihood: gpflow.likelihoods.Likelihood, num_data=None)
+
+   Bases: :py:obj:`SpatioTemporalBase`
+
+   Model for Spatio-temporal GP regression using a factor kernel
+   k_space_time((s,t),(s',t')) = k_time(t,t') * k_space(s,s')
+
+   where k_time is a Markovian kernel.
+
+   :param inducing_space: inducing space points [Ms, D]
+   :param inducing_time: inducing time points [Mt,]
+   :param kernel_space: Gpflow space kernel
+   :param kernel_time: Markovflow time kernel
+   :param likelihood: a likelihood object
+   :param num_data: number of observations
+
+   .. py:method:: elbo(self, input_data: Tuple[tensorflow.Tensor, tensorflow.Tensor]) -> tensorflow.Tensor
+
+      Calculates the evidence lower bound (ELBO) log p(y)
+
+      :param input_data: A tuple of space-time points and observations containing data at which
+          to calculate the loss for training the model.
+      :return: A scalar tensor (summed over the batch_shape dimension) representing the ELBO.
+
+
+   .. py:method:: loss(self, input_data: Tuple[tensorflow.Tensor, tensorflow.Tensor]) -> tensorflow.Tensor
+
+      Return the loss, which is the negative evidence lower bound (ELBO).
+
+      :param input_data: A tuple of space-time points and observations containing the data
+          at which to calculate the loss for training the model.
+
+
+   .. py:method:: posterior(self) -> markovflow.posterior.PosteriorProcess
+      :property:
+
+      Posterior process 
+
+
+   .. py:method:: predict_log_density(self, input_data: Tuple[tensorflow.Tensor, tensorflow.Tensor], full_output_cov: bool = False) -> tensorflow.Tensor
+
+      Compute the log density of the data at the new data points.
+
+
+

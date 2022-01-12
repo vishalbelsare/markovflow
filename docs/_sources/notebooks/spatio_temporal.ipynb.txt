@@ -1,0 +1,182 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fe5bcabf",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import numpy as np\n",
+    "import tensorflow as tf\n",
+    "from gpflow import set_trainable\n",
+    "from gpflow.ci_utils import ci_niter\n",
+    "from gpflow.kernels import RBF\n",
+    "from gpflow.likelihoods import Gaussian\n",
+    "from matplotlib import pyplot as plt\n",
+    "from markovflow.kernels import Matern32\n",
+    "from markovflow.models import SparseSpatioTemporalVariational\n",
+    "from markovflow.ssm_natgrad import SSMNaturalGradient\n",
+    "\n",
+    "np.random.seed(10)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "cb1906ba",
+   "metadata": {},
+   "source": [
+    "Declaring the model "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "0b8ebc5b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "M_time = 7\n",
+    "M_space = 4\n",
+    "\n",
+    "kernel_space = RBF(variance=1.0, lengthscales=0.2)\n",
+    "kernel_time = Matern32(variance=1.0, lengthscale=0.2)\n",
+    "likelihood = Gaussian(variance=0.1)\n",
+    "\n",
+    "inducing_space = np.linspace(0.1, 0.9, M_space).reshape(-1, 1)\n",
+    "inducing_time = np.linspace(0, 1, M_time).reshape(-1, )\n",
+    "\n",
+    "model = SparseSpatioTemporalVariational(\n",
+    "    inducing_time=tf.identity(inducing_time),\n",
+    "    inducing_space=tf.identity(inducing_space),\n",
+    "    kernel_space=kernel_space,\n",
+    "    kernel_time=kernel_time,\n",
+    "    likelihood=likelihood,\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "3aede1d1",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Creating data\n",
+    "num_data = 200\n",
+    "time_points = np.random.rand(num_data, 1)\n",
+    "space_points = np.random.rand(num_data, 1)\n",
+    "X = np.concatenate([space_points, time_points], -1)\n",
+    "f = lambda v: np.cos(5.0 * (v[..., 1:] + v[..., :1]))\n",
+    "F = f(X)\n",
+    "Y = F + np.random.randn(num_data, 1)\n",
+    "data = (X, Y)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "ffcc5e6f",
+   "metadata": {},
+   "source": [
+    "Creating a plotting grid and plotting function"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "8ac0ab61",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "x_grid, t_grid = np.meshgrid(np.linspace(0, 1, 50), np.linspace(0, 1, 50))\n",
+    "X_grid = np.concatenate([x_grid.reshape(-1, 1), t_grid.reshape(-1, 1)], axis=-1)\n",
+    "\n",
+    "\n",
+    "def plot_model(model):\n",
+    "    mu_f, var_f = model.space_time_predict_f(X_grid)\n",
+    "    fig, axarr = plt.subplots(2, 1)\n",
+    "    axarr[0].scatter(x=space_points, y=time_points, c=Y)\n",
+    "    axarr[1].scatter(x=X_grid[..., :1], y=X_grid[..., 1:], c=mu_f.numpy())\n",
+    "\n",
+    "    for ax in axarr:\n",
+    "        ax.hlines(model.inducing_space, xmin=time_points.min(), xmax=time_points.max(), colors=\"r\")\n",
+    "        ax.vlines(\n",
+    "            model.inducing_space, ymin=space_points.min(), ymax=space_points.max(), colors=\"k\"\n",
+    "        )\n",
+    "\n",
+    "    plt.savefig(\"spatio_temporal.pdf\", dpi=300)\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "249a67e2",
+   "metadata": {},
+   "source": [
+    "Training"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "0867d971",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Start at a small learning rate\n",
+    "adam_learning_rate = 0.0001\n",
+    "natgrad_learning_rate = 0.5\n",
+    "\n",
+    "adam_opt = tf.optimizers.Adam(learning_rate=adam_learning_rate)\n",
+    "natgrad_opt = SSMNaturalGradient(gamma=natgrad_learning_rate, momentum=False)\n",
+    "\n",
+    "set_trainable(model.ssm_q, False)\n",
+    "adam_var_list = model.trainable_variables  # trainable_variables\n",
+    "set_trainable(model.ssm_q, True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "a1119f4e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# tf.function\n",
+    "def loss(input_data):\n",
+    "    return -model.elbo(input_data)\n",
+    "\n",
+    "\n",
+    "# tf.function\n",
+    "def opt_step(input_data):\n",
+    "    natgrad_opt.minimize(lambda: loss(input_data), model.ssm_q)\n",
+    "    adam_opt.minimize(lambda: loss(input_data), adam_var_list)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "05161cfd",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "max_iter = ci_niter(500)\n",
+    "\n",
+    "for i in range(max_iter):\n",
+    "    opt_step(data)\n",
+    "    if i % 20 == 0:\n",
+    "        plot_model(model)\n",
+    "        print(\"Iteration:\", i, \", Loss:\", model.loss(data).numpy())"
+   ]
+  }
+ ],
+ "metadata": {
+  "jupytext": {
+   "cell_metadata_filter": "-all",
+   "main_language": "python",
+   "notebook_metadata_filter": "-all"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
